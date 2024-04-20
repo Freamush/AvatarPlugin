@@ -1,0 +1,4 @@
+name: AvatarPlugin
+version: '${project.version}'
+main: me.fream.Main
+api-version: '1.20'
