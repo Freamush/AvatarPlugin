@@ -1,91 +1,106 @@
 package me.fream.Skills.Earth;
 
+import io.lumine.mythic.api.mobs.MythicMob;
 import io.lumine.mythic.bukkit.MythicBukkit;
+import io.lumine.mythic.bukkit.events.MythicDamageEvent;
 import io.lumine.mythic.core.mobs.ActiveMob;
 import me.fream.Main;
+import me.fream.Skills.GlobalConditions;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.entity.EntityChangeBlockEvent;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.entity.*;
 import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.potion.PotionEffect;
-import org.bukkit.potion.PotionEffectType;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
 import java.time.LocalTime;
 import java.util.*;
 
-import static me.fream.Skills.Earth.GlobalConditions.cooldown;
+import static me.fream.Skills.GlobalConditions.*;
 
 public class EarthThrowingStone implements Listener {
     public static Map<UUID, ActiveMob> caster = new HashMap<>();
-    public static Map<UUID, BukkitTask> laucnhedTasks = new HashMap<>();
+  //  protected static Map<UUID, BukkitTask> timeToDestroy = new HashMap<>();
+      public static Set<UUID> isNotReady = new HashSet<>();
 
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
-        if (event.getPlayer().getInventory().getItemInMainHand().getType().equals(Material.FEATHER)) {
+        if (event.getPlayer().getInventory().getItemInMainHand().getType().equals(Material.BOW)) {
             if (!cooldown.containsKey(event.getPlayer().getUniqueId()) || cooldown.get(event.getPlayer().getUniqueId()).isBefore(LocalTime.now())) {
-                if (event.getAction().isRightClick() || event.getAction() == Action.RIGHT_CLICK_AIR) {
-                    if (event.getClickedBlock() == null || !event.getClickedBlock().getType().isInteractable()) {
-                        if (caster.containsKey(event.getPlayer().getUniqueId())) {
-                            caster.get(event.getPlayer().getUniqueId()).despawn();
-                            spawnBall(event.getPlayer());
-                        } else {
-                            //todo autodespawn
-                            spawnBall(event.getPlayer());
-                        }
-                    }
+                if (event.getAction() == Action.RIGHT_CLICK_AIR) {
+                    event.getPlayer().getInventory().setItem(40, new ItemStack(Material.ARROW));
+                    spawnBall(event.getPlayer());
                 }
-            }
+            } else {
+                event.setCancelled(true);
+                //todo фикс райт клика чтобы не спавнило валун
         }
+            }
+            }
+
+
+
+    @EventHandler
+    public void onDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Fireball && MythicBukkit.inst().getMobManager().isMythicMob(event.getEntity())) {
+            event.setCancelled(true);
+        }
+
     }
 
     @EventHandler
-    public void onEntityAttack(EntityDamageByEntityEvent event) {
-        if (event.getDamager() instanceof Player) {
-            Player player = (Player) event.getDamager();
-            if (event.getEntity() instanceof Fireball && MythicBukkit.inst().getMobManager().isMythicMob(event.getEntity())) {
-                if (laucnhedTasks.containsKey(player.getUniqueId())){
-                    event.setCancelled(true);
-                    player.sendTitle(ChatColor.RED+"Вы не готовы!", ChatColor.RED+"подождите...");
-                    return;
-                }
-                Fireball fireball = (Fireball) event.getEntity();
-                Vector direction = player.getLocation().getDirection().normalize();
-                fireball.setVelocity(direction.multiply(0.5));
+    public void onProjectileLaunch(EntityShootBowEvent event) {
+        if (event.getEntity() instanceof Player){
+            Player player = (Player) event.getEntity();
+                if (isNotReady.contains(player.getUniqueId())) {
+                    ActiveMob activeMob = caster.get(player.getUniqueId());
+                    if (activeMob != null) {
+                        activeMob.remove();
+                        caster.remove(player.getUniqueId());
+                    }
+                    caster.remove(player.getUniqueId());
+                    progressnar.get(player.getUniqueId()).cancel();
+                    player.sendActionBar(ChatColor.RED + "Отменено");
+                    isNotReady.remove(player.getUniqueId());
+                } else {
+                    ActiveMob activeMob = caster.get(player.getUniqueId());
+                    if (activeMob != null) {
+                        Vector direction = player.getLocation().getDirection().normalize();
+                        Entity fireball = caster.get(player.getUniqueId()).getEntity().getBukkitEntity();
+                        fireball.setVelocity(direction.multiply(0.5));
 
-                new BukkitRunnable() {
-                    @Override
-                    public void run() {
-                        if (!fireball.isDead()) {
-                            Location fireballLocation = fireball.getLocation();
-                            for (Entity entity : fireball.getNearbyEntities(2, 2, 2)) {
-                                if (entity instanceof LivingEntity && !isCaster(entity)) {
-                                    ((LivingEntity) entity).damage(5);
-                                    breakBlocksAround(fireball, fireballLocation);
-                                    playEffectofExplosion(fireballLocation);
-                                    fireball.remove();
-                                    this.cancel(); // Stop monitoring the Fireball
-                                    caster.remove(player.getUniqueId());
-                                    return;
+                        //timeToDestroy.get(player.getUniqueId()).cancel();
+                        new BukkitRunnable() {
+                            @Override
+                            public void run() {
+                                if (!fireball.isDead()) {
+                                    Location fireballLocation = fireball.getLocation();
+                                    for (Entity entity : fireball.getNearbyEntities(2, 2, 2)) {
+                                        if (entity instanceof LivingEntity && !isCaster(entity)) {
 
+                                            ((LivingEntity) entity).damage(5);
+                                            breakBlocksAround(fireball, fireballLocation);
+                                            playEffectofExplosion(fireballLocation);
+                                            fireball.remove();
+                                            this.cancel(); // Stop monitoring the Fireball
+                                            caster.remove(player.getUniqueId());
+                                            return;
+
+                                        }
+                                    }
                                 }
                             }
-                        }
+                        }.runTaskTimer(Main.getInstance(), 0, 1);
                     }
-                }.runTaskTimer(Main.getInstance(), 0, 1);
+                }
                 event.setCancelled(true);
-            }
         }
     }
-
         private static void breakBlocksAround(Entity entity, Location location) {
             int radius = 2;
             int height = 5;
@@ -143,41 +158,17 @@ public class EarthThrowingStone implements Listener {
         Location frontspawn = eyeloc.add(vector);
         ActiveMob activeMob = MythicBukkit.inst().getMobManager().spawnMob("Earthbig", frontspawn);
         caster.put(uuidPlayer, activeMob);
-        cooldown.put(uuidPlayer, LocalTime.now().plusSeconds(4));
-        startProgress(p);
-        p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, 2*25, 2));
+        isNotReady.add(uuidPlayer);
+       setCooldown(p,3,2.7);
+        // BukkitTask scheduler =  Bukkit.getScheduler().runTaskLater(Main.getPlugin(Main.class), () -> caster.get(p.getUniqueId()).remove(), 7*20); //
+       // timeToDestroy.put(p.getUniqueId(), scheduler);
     }
-
-    public void startProgress(Player player) {
-  BukkitTask bukkitTask = new BukkitRunnable() {
-
-          String bar = ChatColor.GRAY+"[Применяется...] ";
-          int counter = 0;
-
-          @Override
-          public void run() {
-              // Добавляем символы к строке в actionbar
-              bar += ChatColor.GREEN+ "█";
-              player.sendActionBar(bar);
-              // После 10 символов останавливаем
-              if (++counter >= 10) {
-                  // Останавливаем задачу после добавления 10 символов
-                 cancel();
-                 player.sendActionBar(ChatColor.GREEN+"Готов!");
-                 laucnhedTasks.remove(player.getUniqueId());
-
-              }
-                }
-
-        }.runTaskTimer(Main.getInstance(), 0L,5L);
-        laucnhedTasks.put(player.getUniqueId(), bukkitTask);
-    }
-
-
+    
     public void playEffectofExplosion(Location location){
         location.getWorld().playSound(location, Sound.ENTITY_GENERIC_EXPLODE, 2.0f, 1.0f);
         location.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, location, 1);
         location.getWorld().spawnParticle(Particle.SMOKE_LARGE, location, 5);
+
     }
 
 
